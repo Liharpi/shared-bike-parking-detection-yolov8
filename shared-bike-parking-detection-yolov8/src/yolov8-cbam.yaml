@@ -1,0 +1,46 @@
+# ==========================================
+# 🚀 改进版 YOLOv8 架构 (加入 CBAM 注意力机制)
+# 针对场景：共享单车密集遮挡、复杂城市背景
+# ==========================================
+
+# --- 缺失的头部全局参数（已修复） ---
+nc: 3  # 类别数量 (0: bike, 1: fallen_bike, 2: parking_area)
+scales:
+  # [depth_multiple, width_multiple, max_channels]
+  n: [0.33, 0.25, 1024]  # 强制使用 YOLOv8n (Nano) 的模型缩放比例
+
+# YOLOv8.0n backbone
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]  # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 3, C2f, [128, True]]
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 6, C2f, [256, True]]
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 6, C2f, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 3, C2f, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]    # 9
+  - [-1, 1, CBAM, [1024]]       # 10 🚀 核心改进 1: Backbone 末端，强化深层全局语义提取
+
+# YOLOv8.0n head
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [[-1, 6], 1, Concat, [1]]  # cat backbone P4
+  - [-1, 3, C2f, [512]]        # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [[-1, 4], 1, Concat, [1]]  # cat backbone P3
+  - [-1, 3, C2f, [256]]        # 16 (P3/8-small)
+  - [-1, 1, CBAM, [256]]       # 17 🚀 核心改进 2: Neck 浅层融合处，提升小目标与密集遮挡单车的局部特征响应
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]] # cat head P4
+  - [-1, 3, C2f, [512]]        # 20 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 10], 1, Concat, [1]] # cat head P5 (连接 Layer 10 的 CBAM)
+  - [-1, 3, C2f, [1024]]       # 23 (P5/32-large)
+
+  - [[17, 20, 23], 1, Detect, [nc]]  # Detect(P3, P4, P5)
